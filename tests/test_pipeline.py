@@ -17,6 +17,22 @@ from test_nmap_ingest import XML
 
 
 class PipelineTests(unittest.TestCase):
+    def test_cli_url_target_and_bare_scope(self):
+        # Exercise the real engine parser and guard; permanent denial guarantees
+        # that a URL target can be verified here without live target traffic.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scope').write_text('127.0.0.1\n')
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                 patch('vulnscope2.engine.PortChecker.run', new_callable=AsyncMock) as ports:
+                code = main(['--scope', str(root / 'scope'), '--authorized-by', 'fixture',
+                             '--json', str(root / 'report.json'), 'https://127.0.0.1:443/foo'])
+            data = json.loads((root / 'report.json').read_text())
+            self.assertEqual(code, 0)
+            self.assertEqual(data['targets'], ['127.0.0.1'])
+            self.assertIn('permanently denied', data['errors'][0])
+            ports.assert_not_awaited()
+
     def test_nmap_to_nonstandard_http_to_cve_and_reports(self):
         requests = []
         @asynccontextmanager

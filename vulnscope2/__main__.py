@@ -30,7 +30,7 @@ def parse_ports(text):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='vulnscope2', description='Scoped async vulnerability assessment and active validation')
-    parser.add_argument('targets', nargs='*')
+    parser.add_argument('targets', nargs='*', help='Individual hosts, IPs or URLs; CIDRs belong in scope rules')
     parser.add_argument('--scope', required=True)
     parser.add_argument('--authorized-by', required=True)
     discovery = parser.add_mutually_exclusive_group()

@@ -22,17 +22,21 @@ python3 -m vulnscope2 --scope scope.txt --authorized-by "Infrastructure owner / 
 python3 -m vulnscope2 --scope scope.txt --authorized-by "Infrastructure owner / ticket SEC-123" host.example
 ```
 
-Targets are individual ASCII hostnames (use punycode for international names) or IP addresses, not URLs or CIDRs. CIDRs belong in **scope rules**. Default discovery checks 23 common service ports. `--ports` accepts 1–4096 selected ports. Neither discovery mode implies all 65,535 ports were checked.
+Targets accept individual ASCII hostnames (use punycode for international names), IP addresses, or URLs. The CLI, Python API and web UI use the same normalizer: `https://amirslm.com/`, `http://amirslm.com`, and `amirslm.com:443/foo` all become `amirslm.com`. Schemes, paths, queries, fragments and ports are discarded; a pasted URL does not select scan ports or paths. Use brackets for IPv6 URLs, e.g. `https://[2001:db8::1]:443/`. CIDRs belong in **scope rules**, never target expansion. Default discovery checks 23 common service ports. `--ports` accepts 1–4096 selected ports. Neither discovery mode implies all 65,535 ports were checked.
 
-Scope uses the same v1 syntax:
+Scope accepts `allow <target>`, `deny <target>`, or a bare hostname/IP/CIDR as an allow rule. Host values accept URLs too:
 
 ```text
+amirslm.com
+allow https://api.example.com/
 allow .example.com
 allow 192.0.2.0/24
 deny admin.example.com
 ```
 
-An allow rule is required; deny overrides allow. Every target goes through the original `scope.guard()` before discovery, DNS policy checking, or imported-service assessment. Every returned address is vetted, then one is pinned for this run (IPv4 preferred, deterministic ordering). **Other vetted addresses are not scanned.** Connections use numeric sockets; the hostname is used only for HTTP Host and TLS SNI. Redirects are never followed, and environment proxies are not used.
+One rule per line; extra whitespace, blank lines and `#` comments are accepted. Malformed rules show the received input and a suggested correction: `alllow target https://amirslm.com/` suggests `allow amirslm.com` and must be corrected before submitting.
+
+An allow rule is required; deny overrides allow. Empty or comment-only scope authorizes nothing, and unlisted hosts are refused. Every target goes through the original `scope.guard()` before discovery, DNS policy checking, or imported-service assessment. Every returned address is vetted, then one is pinned for this run (IPv4 preferred, deterministic ordering). **Other vetted addresses are not scanned.** Connections use numeric sockets; the hostname is used only for HTTP Host and TLS SNI. Redirects are never followed, and environment proxies are not used.
 
 The permanent-deny list keeps all v1 entries: loopback, link-local including `169.254.169.254`, IPv4 multicast, and limited broadcast. V2 additionally blocks IPv6 multicast, IPv4-mapped IPv6, and unspecified destinations. The `guard()` function itself is unchanged; its module documentation now accurately describes the engine's call-once/pin flow. There is no scope bypass or “scan everything” mode. `authorized_by` is mandatory in both the CLI and Python API.
 
@@ -113,7 +117,7 @@ python3 -m venv .venv
 
 FastAPI and uvicorn are optional web dependencies; the CLI and Python engine remain dependency-free. All frontend assets are included locally, with no CDN or build step. The launcher binds **127.0.0.1 by default**. Listening beyond localhost requires an explicit `--host` option. This is a single-operator tool without user authentication; only expose it to trusted operators, behind access control if needed. The local browser boundary rejects foreign origins and requires a per-process CSRF token for writes; this is not a remote authentication system.
 
-Enter individual targets (one per line or comma-separated), paste the same `allow` / `deny` rules used in a scope file, and supply **Authorized by** with the owner or approval reference. Both authorization and a non-empty scope containing an allow rule are mandatory; invalid requests are rejected before a job is scheduled. The unchanged engine still runs `scope.guard()` on every target. Even an explicit allow rule cannot permit loopback or another permanently denied address.
+Enter individual targets or URLs (one per line or comma-separated). In Scope, enter `allow` / `deny` rules or bare hostnames/IPs/CIDRs. **Authorize these targets** adds `allow <host>` lines from the normalized Targets field while preserving existing rules, including denies. Review the visible, editable scope and supply **Authorized by** with the owner or approval reference before starting. Clicking the button does not start an assessment. Both authorization and a non-empty scope containing an allow rule are mandatory; invalid requests are rejected before a job is scheduled. The unchanged engine still runs `scope.guard()` on every target. Even an explicit allow rule cannot permit loopback or another permanently denied address.
 
 Choose **Native** async TCP discovery or **Nmap** service/version discovery. Both use the core's 23 common service ports and existing timeout/concurrency defaults. Nmap falls back to native only when the executable is absent. The web UI accepts at most 64 targets per run, with two simultaneous runs to bound total work.
 
@@ -124,6 +128,8 @@ Live activity streams the engine's target-level progress over Server-Sent Events
 Closing a tab does not stop a scan. Refreshing its run URL reconnects and replays progress. **Stop scan** cancels the engine task and its async network/subprocess work; cancellation has incomplete coverage and no final engine report, so downloads remain unavailable. Server shutdown also cancels active runs. Use the supplied launcher with one worker; multiple workers or reload would split or discard the in-memory scan store.
 
 The HTTP interface is `GET /api/config` (defaults and CSRF token), `POST /api/scans` with JSON fields `targets` (array), `scope` (text), `authorized_by` (text), and `nmap` (boolean), plus `GET /api/scans/{id}`, `GET /api/scans/{id}/events`, `POST /api/scans/{id}/cancel`, and `GET /api/scans/{id}/report.json` / `report.html`. Writes need `X-Vulnscope-Token` from `/api/config`; browser requests must use the server's own origin. SSE supports `Last-Event-ID` replay and idle heartbeats. Missing authorization or scope returns HTTP 422; a target refused by the engine produces an incomplete report with the refusal preserved.
+
+`POST /api/targets/normalize` accepts a `targets` array and returns normalized, deduplicated hosts for the scope button. It performs no DNS lookup, creates no policy and schedules no scan; the same body limits and CSRF protection apply.
 
 ## Reports and CI
 

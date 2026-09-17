@@ -346,6 +346,13 @@ input[type=radio] {
   border-color:transparent;
   color:var(--muted)
 }
+.button.authorize {
+  width:100%;
+  margin-top:8px;
+  color:var(--accent);
+  border-color:var(--accent);
+  background:var(--accent-soft)
+}
 .button.compact {
   padding:6px 10px;
   font-size:11px

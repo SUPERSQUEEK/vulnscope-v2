@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import importlib.util
+import ipaddress
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -61,7 +62,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.app.state.store.runs)
 
     async def test_invalid_targets_and_options_never_schedule(self):
-        invalid = [{'targets': []}, {'targets': 'example.com'}, {'targets': ['https://example.com']},
+        invalid = [{'targets': []}, {'targets': 'example.com'}, {'targets': ['https://']},
                    {'targets': ['192.0.2.0/24']}, {'targets': [None]}, {'targets': ['']},
                    {'targets': ['a.example'] * 65}, {'nmap': 'true'}, {'nmap': 1},
                    {'skip_scope': True}, {'scope': 'a' * 65537}, {'authorized_by': 'a' * 1025}]
@@ -71,6 +72,36 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                     response = await self.client.post('/api/scans', json=dict(self.valid, **fields), headers=self.headers)
                     self.assertEqual(response.status_code, 422)
             run.assert_not_awaited()
+
+    async def test_url_targets_and_bare_scope_accepted_with_real_guard(self):
+        data = dict(self.valid, targets=['https://amirslm.com/', 'amirslm.com:443/foo'],
+                    scope='amirslm.com')
+        with patch('vulnscope2.scope._resolve', return_value={ipaddress.ip_address('192.0.2.8')}), \
+             patch('vulnscope2.engine.PortChecker.run', new_callable=AsyncMock) as ports, \
+             patch('vulnscope2.engine.DnsChecker.run', new_callable=AsyncMock):
+            scan = await self.start(data)
+            await scan.task
+            self.assertEqual(scan.targets, ['amirslm.com'])
+            self.assertTrue(scan.report.to_dict()['complete'])
+            self.assertEqual(ports.call_args.args[0].ip, '192.0.2.8')
+        response = await self.client.post('/api/scans', json=dict(data, scope=''), headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+
+    async def test_normalization_affordance_never_schedules_or_resolves(self):
+        with patch('vulnscope2.scope._resolve') as resolve, \
+             patch('vulnscope2.engine.run_scan', new_callable=AsyncMock) as run:
+            response = await self.client.post('/api/targets/normalize',
+                json={'targets': ['https://amirslm.com/', 'amirslm.com:443/foo', 'http://[2001:db8::1]/']},
+                headers=self.headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['targets'], ['amirslm.com', '2001:db8::1'])
+            for data in ({'targets': []}, {'targets': ['192.0.2.0/24']}, None, {'targets': ['https://']},
+                         {'targets': ['example.com'], 'scope': 'example.com'}):
+                response = await self.client.post('/api/targets/normalize', json=data, headers=self.headers)
+                self.assertIn(response.status_code, (415, 422))
+            resolve.assert_not_called()
+            run.assert_not_awaited()
+        self.assertFalse(self.app.state.store.runs)
 
     async def test_bad_bodies_and_browser_boundary(self):
         response = await self.client.post('/api/scans', json=self.valid)

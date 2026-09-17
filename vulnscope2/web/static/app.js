@@ -29,6 +29,7 @@ function setBusy(value) {
   busy = value;
   $("scan-fields").disabled = value;
   $("start").disabled = value || !token;
+  $("authorize-targets").disabled = value || !token;
   $("start").textContent = value ? "Assessment in progress…" : "Start assessment ↗";
   $("cancel").hidden = !value;
   $("activity-dot").classList.toggle("active", value);
@@ -200,13 +201,38 @@ function connect(id) {
     recovery = setTimeout(() => refreshRun(id), 3000);
   };
 }
+function targetInputs() {
+  return $("targets").value.split(/[\s,]+/).filter(Boolean);
+}
+$("authorize-targets").onclick = async () => {
+  if (busy) return;
+  showError("");
+  $("scope-status").textContent = "";
+  $("authorize-targets").disabled = true;
+  const originalTargets = $("targets").value;
+  try {
+    const data = await api("/api/targets/normalize", post({targets: targetInputs()}));
+    if (busy || $("targets").value !== originalTargets) {
+      showError("Targets changed or an assessment started. Review targets and click Authorize these targets again.");
+      return;
+    }
+    // Preserve existing rules, especially denials. Clicking never submits a scan.
+    const existing = $("scope").value.trimEnd();
+    const lines = new Set(existing.split("\n").map(line => line.trim()));
+    const additions = data.targets.map(host => `allow ${host}`).filter(line => !lines.has(line));
+    $("scope").value = [existing, ...additions].filter(Boolean).join("\n");
+    $("scope-status").textContent = `${additions.length} allow rule(s) added. Review scope, then start the assessment.`;
+    $("scope").focus();
+  } catch (error) { showError(error.message); }
+  finally { $("authorize-targets").disabled = busy || !token; }
+};
 $("scan-form").addEventListener("submit", async event => {
   event.preventDefault(); if (busy) return; showError("");
-  const targets = $("targets").value.split(/[\s,]+/).filter(Boolean);
+  const targets = targetInputs();
   const scope = $("scope").value, authorizedBy = $("authorized-by").value;
   if (!authorizedBy.trim()) { showError("Authorized by is required. Enter the owner or approval reference."); $("authorized-by").focus(); return; }
   if (!scope.trim()) { showError("An explicit scope with at least one allow rule is required."); $("scope").focus(); return; }
-  if (!targets.length) { showError("Enter at least one individual target hostname or IP."); $("targets").focus(); return; }
+  if (!targets.length) { showError("Enter at least one individual target hostname, URL or IP."); $("targets").focus(); return; }
   setBusy(true);
   $("cancel").disabled = true;
   try {

@@ -18,6 +18,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 from dataclasses import dataclass, field
+from .models import target_name
 
 
 class ScopeError(Exception):
@@ -61,9 +62,11 @@ class Scope:
 
     @classmethod
     def from_lines(cls, lines):
-        """Parse a scope file. Each line is 'allow <target>' or 'deny <target>'.
+        """Parse explicit allow/deny rules; a bare target is an allow rule.
         A target is a hostname, a hostname suffix beginning with '.', an IP, or
-        a CIDR. Blank lines and '#' comments are ignored."""
+        a CIDR. URLs are reduced to hosts. Blank lines and '#' comments are ignored.
+        Unknown keywords are suggested corrections, never inferred permissions.
+        """
         s = cls()
         for i, raw in enumerate(lines):
             # Strip a UTF-8 BOM if this is the first line. Windows editors and
@@ -76,9 +79,30 @@ class Scope:
             if not line:
                 continue
             parts = line.split()
-            if len(parts) != 2 or parts[0] not in ("allow", "deny"):
-                raise ScopeError(f"Malformed scope line: {raw!r} (expected 'allow <target>' or 'deny <target>')")
-            action, target = parts[0], parts[1].lower()
+            try:
+                if len(parts) == 1 and parts[0] not in ('allow', 'deny'):
+                    action, value = 'allow', parts[0]
+                elif len(parts) == 2 and parts[0] in ('allow', 'deny'):
+                    action, value = parts
+                else:
+                    raise ValueError('Expected a bare target, allow <target>, or deny <target>')
+                target = _scope_target(value)
+            except ValueError as exc:
+                # A correction is advice only. Even a likely keyword typo must
+                # be fixed by the operator before any policy can be used.
+                suggestion = 'example.com'
+                for part in parts[1:] or parts:
+                    if part in ('allow', 'deny', 'target'):
+                        continue
+                    try:
+                        suggestion = _scope_target(part)
+                    except ValueError:
+                        continue
+                    break
+                action = 'deny' if parts[0] == 'deny' else 'allow'
+                raise ScopeError(f'Cannot parse scope line {i + 1}: {raw!r}. {exc}. '
+                                 f'Use {action + " " + suggestion!r} '
+                                 '(or a bare hostname/IP/CIDR to allow it).') from exc
             allow = action == "allow"
             net = _as_network(target)
             if net is not None:
@@ -112,6 +136,16 @@ class Scope:
 
     def is_empty(self):
         return not (self.allow_hosts or self.allow_suffixes or self.allow_nets)
+
+
+def _scope_target(value):
+    """Preserve network/suffix rule meaning before normalizing individual hosts."""
+    net = _as_network(value)
+    if net is not None:
+        return str(net)
+    if value.startswith('.'):
+        return '.' + target_name(value[1:])
+    return target_name(value)
 
 
 def _as_network(target):

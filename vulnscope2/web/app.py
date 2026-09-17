@@ -21,6 +21,27 @@ STATIC = Path(__file__).parent / 'static'
 MAX_BODY = 128 * 1024
 
 
+def normalize_targets(targets):
+    """Normalize input only; this never grants scope or performs target I/O."""
+    if not isinstance(targets, list) or not 1 <= len(targets) <= 64:
+        raise ValueError('Provide between 1 and 64 individual target hostnames, URLs or IPs.')
+    return list(dict.fromkeys(target_name(target) for target in targets))
+
+
+async def read_json(request):
+    if request.headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json':
+        raise HTTPException(415, 'Send the assessment as application/json.')
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_BODY:
+            raise HTTPException(413, 'Assessment request exceeds 128 KiB.')
+    try:
+        return json.loads(body)
+    except (ValueError, UnicodeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 def validate_scan(data):
     """Use the core parsers before scheduling; the engine still enforces guard.
 
@@ -42,10 +63,7 @@ def validate_scan(data):
     scope = Scope.from_lines(scope_text.splitlines())
     if scope.is_empty():
         raise ValueError('An explicit scope with at least one allow rule is required.')
-    targets = data.get('targets')
-    if not isinstance(targets, list) or not 1 <= len(targets) <= 64:
-        raise ValueError('Provide between 1 and 64 individual target hostnames or IPs.')
-    targets = list(dict.fromkeys(target_name(target) for target in targets))
+    targets = normalize_targets(data.get('targets'))
     nmap = data.get('nmap', False)
     if type(nmap) is not bool:
         raise ValueError('nmap must be true or false.')
@@ -103,17 +121,22 @@ def create_app(host='127.0.0.1'):
     async def config():
         return {'token': store.token, 'ports': sorted(COMMON_PORTS), 'max_targets': 64}
 
+    @app.post('/api/targets/normalize')
+    async def normalize(request: Request):
+        # The UI calls this only on an explicit button click, then displays the
+        # hosts as editable scope text. No policy or scan is created here.
+        data = await read_json(request)
+        try:
+            if not isinstance(data, dict) or set(data) != {'targets'}:
+                raise ValueError('Provide a JSON object with a targets array.')
+            return {'targets': normalize_targets(data['targets'])}
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @app.post('/api/scans', status_code=202)
     async def start(request: Request):
-        if request.headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json':
-            raise HTTPException(415, 'Send the assessment as application/json.')
-        body = bytearray()
-        async for chunk in request.stream():
-            body.extend(chunk)
-            if len(body) > MAX_BODY:
-                raise HTTPException(413, 'Assessment request exceeds 128 KiB.')
         try:
-            args = validate_scan(json.loads(body))
+            args = validate_scan(await read_json(request))
         except (ValueError, ScopeError, UnicodeError) as exc:
             raise HTTPException(422, str(exc)) from exc
         try:

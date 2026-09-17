@@ -25,10 +25,12 @@
           <fieldset id="scan-fields">
             <label for="targets">Targets <span class="required">Required</span></label>
             <textarea id="targets" name="targets" rows="3" required placeholder="api.example.com&#10;192.0.2.10" aria-describedby="targets-help" spellcheck="false" maxlength="17000"></textarea>
-            <p id="targets-help" class="hint">One host or IP per line, or comma-separated. No URLs or CIDRs. Up to 64 targets.</p>
+            <p id="targets-help" class="hint">Hosts, IPs or URLs, one per line or comma-separated. URL paths and ports are ignored. CIDRs belong in scope. Up to 64 targets.</p>
             <label for="scope">Scope rules <span class="required">Required</span></label>
             <textarea id="scope" name="scope" class="code-input" rows="5" required placeholder="allow api.example.com&#10;allow 192.0.2.0/24&#10;deny admin.example.com" aria-describedby="scope-help" spellcheck="false" maxlength="65536"></textarea>
-            <p id="scope-help" class="hint">Use scope-file syntax: <code>allow</code> / <code>deny</code>. At least one allow rule; deny takes precedence.</p>
+            <button id="authorize-targets" class="button authorize" type="button" disabled>Authorize these targets</button>
+            <p id="scope-help" class="hint">Add <code>allow</code> / <code>deny</code> rules, or a bare hostname, IP or CIDR to allow it. URLs accepted. Deny always takes precedence. The button adds allow lines and keeps existing rules; review before starting.</p>
+            <p id="scope-status" class="hint" role="status"></p>
             <label for="authorized-by">Authorized by <span class="required">Required</span></label>
             <input id="authorized-by" name="authorized_by" required maxlength="1024" placeholder="Owner / approval ticket" autocomplete="off">
             <p class="hint">The authorization reference is included in your report.</p>
