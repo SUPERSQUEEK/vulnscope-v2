@@ -95,7 +95,35 @@ report = asyncio.run(run_scan(
 print(report.counts(), report.exit_code)
 ```
 
-`run_scan` is async; `run_scan_sync` serves synchronous callers. Internal checker and adapter functions accept already-vetted contexts; they are not independent public scanning interfaces. A future UI must call the engine. V1's desktop GUI and web server are not included in this package.
+`run_scan` is async; `run_scan_sync` serves synchronous callers. Internal checker and adapter functions accept already-vetted contexts; they are not independent public scanning interfaces. The optional web UI below calls this same engine.
+
+## Web UI
+
+Launch the optional assessment workspace from this checkout:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-web.txt
+.venv/bin/python -m vulnscope2.web
+# Open http://127.0.0.1:8765
+
+# Choose another port:
+.venv/bin/python -m vulnscope2.web --port 9000
+```
+
+FastAPI and uvicorn are optional web dependencies; the CLI and Python engine remain dependency-free. All frontend assets are included locally, with no CDN or build step. The launcher binds **127.0.0.1 by default**. Listening beyond localhost requires an explicit `--host` option. This is a single-operator tool without user authentication; only expose it to trusted operators, behind access control if needed. The local browser boundary rejects foreign origins and requires a per-process CSRF token for writes; this is not a remote authentication system.
+
+Enter individual targets (one per line or comma-separated), paste the same `allow` / `deny` rules used in a scope file, and supply **Authorized by** with the owner or approval reference. Both authorization and a non-empty scope containing an allow rule are mandatory; invalid requests are rejected before a job is scheduled. The unchanged engine still runs `scope.guard()` on every target. Even an explicit allow rule cannot permit loopback or another permanently denied address.
+
+Choose **Native** async TCP discovery or **Nmap** service/version discovery. Both use the core's 23 common service ports and existing timeout/concurrency defaults. Nmap falls back to native only when the executable is absent. The web UI accepts at most 64 targets per run, with two simultaneous runs to bound total work.
+
+Live activity streams the engine's target-level progress over Server-Sent Events; it does not estimate a percentage or imply per-probe coverage. On completion, the dashboard shows severity counts, targets, authorization, worst severity, and coverage status. Click a severity card, select a checker, or search the findings. Open a finding for its evidence, remediation, primary references, CVEs, validation status, and pinned IP. Version matches remain **candidates**. Review the expanded errors/refusals when a run is **incomplete**, including runs that returned no findings. Completion means no recorded operational errors, not exhaustive coverage; JSON `complete` remains the coverage indicator.
+
+**↓ JSON** and **↓ HTML** download the exact `reporting.to_json()` / `reporting.to_html()` output used by the CLI. Notes and service inventory are also available in the dashboard. Theme selection supports system, light, and dark. Reports live only in server memory: the oldest finished runs are evicted as new runs arrive (20 retained runs maximum), and restarting the server clears them. Download reports to keep them; local saved reports belong under ignored `artifacts/`.
+
+Closing a tab does not stop a scan. Refreshing its run URL reconnects and replays progress. **Stop scan** cancels the engine task and its async network/subprocess work; cancellation has incomplete coverage and no final engine report, so downloads remain unavailable. Server shutdown also cancels active runs. Use the supplied launcher with one worker; multiple workers or reload would split or discard the in-memory scan store.
+
+The HTTP interface is `GET /api/config` (defaults and CSRF token), `POST /api/scans` with JSON fields `targets` (array), `scope` (text), `authorized_by` (text), and `nmap` (boolean), plus `GET /api/scans/{id}`, `GET /api/scans/{id}/events`, `POST /api/scans/{id}/cancel`, and `GET /api/scans/{id}/report.json` / `report.html`. Writes need `X-Vulnscope-Token` from `/api/config`; browser requests must use the server's own origin. SSE supports `Last-Event-ID` replay and idle heartbeats. Missing authorization or scope returns HTTP 422; a target refused by the engine produces an incomplete report with the refusal preserved.
 
 ## Reports and CI
 
@@ -128,6 +156,10 @@ Defaults: `--timeout 6` seconds per network operation, `--concurrency 32` native
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q vulnscope2 tests
 ```
+
+Web tests run with the optional dependencies and the HTTP test client installed (`python3 -m pip install -r requirements-web.txt httpx`). Otherwise only the web tests are skipped. They cover request refusals before engine scheduling, the real permanent-deny path, async streaming/replay, report byte equivalence, cancellation, capacity, browser request boundaries, and localhost defaults, without live target scans.
+
+With the web server running, `python3 tests/web_smoke.py --port 8765` verifies actual HTTP requests, missing authorization/scope refusals, SSE progress, and downloads. Its only assessment target is permanently denied loopback, so it exercises the real engine refusal without scanning infrastructure.
 
 The suite exercises permanent denials, mixed DNS answers, scope precedence, authorization before I/O, empty ingest, nmap XML boundaries, child cleanup, async ordering/concurrency, numeric socket pinning and SNI, CORS confirmation, redirect non-following, HTTP parsing, TLS negotiation evidence, CVE boundaries, report escaping and CI codes. A synthetic full-CLI test covers nmap XML → nonstandard HTTP port → active validation/CVE candidate → JSON/HTML. Its transports are fixtures, not a claim of a live network scan.
 

@@ -24,7 +24,11 @@
   finding-based CI exit codes remain unchanged.
 - **A clean Python package.** `vulnscope2` targets Python 3.11+, has no third-party
   runtime dependencies, and includes a deterministic unittest suite. This release
-  provides CLI and async/sync Python APIs; v1's GUI/web frontend is not ported.
+  provides CLI and async/sync Python APIs.
+- **Optional web workspace.** FastAPI/uvicorn drives the same async engine with
+  live SSE progress, severity/checker/search filters, evidence drawers, light and
+  dark themes, and identical JSON/HTML exports. Explicit scope and authorization
+  remain mandatory; the launcher binds localhost by default.
 
 V2 probes more deeply while stopping at validation: no exploitation,
 state-changing payloads, credential attacks, fuzzing wordlists or access attempts.

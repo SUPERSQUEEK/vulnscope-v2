@@ -1,0 +1,3 @@
+# Optional web interface only. The core CLI remains dependency-free.
+fastapi>=0.115,<1
+uvicorn>=0.30,<1

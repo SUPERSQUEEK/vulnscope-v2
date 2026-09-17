@@ -14,3 +14,6 @@ vulnscope2 = "vulnscope2.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["vulnscope2*"]
+
+[tool.setuptools.package-data]
+"vulnscope2.web" = ["static/*.html", "static/*.css", "static/*.js"]

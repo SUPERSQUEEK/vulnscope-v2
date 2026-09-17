@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>vulnscope2 · Assessment workspace</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="vulnscope2 home"><span class="brand-mark" aria-hidden="true">v<span>2</span></span>vulnscope<span class="brand-version">2</span></a>
+    <span class="top-caption">ASSESSMENT WORKSPACE</span>
+    <button id="theme" class="button quiet" type="button" aria-label="Switch color theme">Theme: system</button>
+  </header>
+  <main>
+    <div class="page-heading"><div><p class="eyebrow">SCOPED. VERIFIED. EXPLAINED.</p><h1>Clarity on your exposure.</h1><p class="muted">Bounded validation, with the evidence to act.</p></div><span class="governed"><span class="dot"></span> Scope enforced on every target</span></div>
+    <div class="workspace">
+      <aside class="setup panel" aria-labelledby="setup-title">
+        <div class="section-heading"><span class="step">01</span><h2 id="setup-title">Define assessment</h2></div>
+        <p class="muted small">Start with the systems you’re authorized to assess.</p>
+        <form id="scan-form">
+          <fieldset id="scan-fields">
+            <label for="targets">Targets <span class="required">Required</span></label>
+            <textarea id="targets" name="targets" rows="3" required placeholder="api.example.com&#10;192.0.2.10" aria-describedby="targets-help" spellcheck="false" maxlength="17000"></textarea>
+            <p id="targets-help" class="hint">One host or IP per line, or comma-separated. No URLs or CIDRs. Up to 64 targets.</p>
+            <label for="scope">Scope rules <span class="required">Required</span></label>
+            <textarea id="scope" name="scope" class="code-input" rows="5" required placeholder="allow api.example.com&#10;allow 192.0.2.0/24&#10;deny admin.example.com" aria-describedby="scope-help" spellcheck="false" maxlength="65536"></textarea>
+            <p id="scope-help" class="hint">Use scope-file syntax: <code>allow</code> / <code>deny</code>. At least one allow rule; deny takes precedence.</p>
+            <label for="authorized-by">Authorized by <span class="required">Required</span></label>
+            <input id="authorized-by" name="authorized_by" required maxlength="1024" placeholder="Owner / approval ticket" autocomplete="off">
+            <p class="hint">The authorization reference is included in your report.</p>
+            <label>Discovery</label>
+            <div class="discovery" role="group" aria-label="Discovery mode">
+              <label class="mode"><input type="radio" name="discovery" value="native" checked><span><strong>Native</strong><small>Async TCP</small></span></label>
+              <label class="mode"><input type="radio" name="discovery" value="nmap"><span><strong>Nmap</strong><small>Service + version</small></span></label>
+            </div>
+            <p id="discovery-help" class="hint">Checks 23 common service ports.</p>
+            <details class="port-details"><summary>View discovery ports</summary><p id="ports" class="hint mono">Loading defaults…</p></details>
+          </fieldset>
+          <p id="form-error" class="error-box" role="alert" hidden></p>
+          <button id="start" class="button primary full" type="submit" disabled>Start assessment <span aria-hidden="true">↗</span></button>
+        </form>
+        <p class="boundary-note">Validation stops at evidence. No exploitation, login attempts, or redirect following.</p>
+      </aside>
+      <div class="results-column">
+        <section class="panel overview" aria-labelledby="overview-title">
+          <div class="overview-top"><div class="section-heading"><span class="step">02</span><h2 id="overview-title">Run overview</h2></div><span id="run-status" class="status" role="status">Ready to assess</span></div>
+          <div class="run-meta"><p id="run-targets">Your next assessment starts here.</p><p id="run-context" class="muted small">Add targets, explicit scope rules, and an authorization reference.</p></div>
+          <div id="severity-counts" class="severity-counts" role="group" aria-label="Filter findings by severity"></div>
+          <div class="summary-footer"><p id="worst" class="small muted">Worst finding <strong>—</strong></p><div class="downloads"><button id="json-download" class="button compact" disabled>↓ JSON</button><button id="html-download" class="button compact" disabled>↓ HTML</button></div></div>
+          <p id="coverage" class="coverage small" hidden></p>
+          <details id="errors-wrap" class="errors" hidden><summary id="errors-title">Errors / refusals</summary><ul id="errors-list"></ul></details>
+          <details id="notes-wrap" class="notes small" hidden><summary>Assessment notes &amp; service inventory</summary><ul id="notes-list"></ul><div id="inventory"></div></details>
+        </section>
+        <section class="panel activity" aria-labelledby="activity-title">
+          <div class="activity-heading"><div class="section-heading"><span id="activity-dot" class="dot"></span><h2 id="activity-title">Live activity</h2></div><div class="activity-actions"><span id="connection" class="small muted">Waiting for a run</span><button id="cancel" class="button compact" hidden>Stop scan</button></div></div>
+          <ol id="event-log" class="event-log" aria-label="Assessment progress"><li class="muted">Scope checks and target progress will appear here.</li></ol>
+          <p id="activity-announcement" class="sr-only" role="status" aria-live="polite"></p>
+        </section>
+        <section class="panel findings-panel" aria-labelledby="findings-title">
+          <div class="findings-heading"><h2 id="findings-title">Findings <span id="finding-total" class="number-label">0</span></h2><span class="small muted">Highest severity first</span></div>
+          <div class="filters"><label class="search-field"><span class="sr-only">Search findings</span><input id="search" type="search" placeholder="Search findings, targets, CVEs…"></label><label><span class="sr-only">Filter by checker</span><select id="checker"><option value="">All checkers</option></select></label><button id="clear-filters" class="button quiet compact">Reset</button></div>
+          <p id="filter-status" class="small muted" role="status">All severities · All checkers</p>
+          <div id="findings"></div>
+          <div id="empty" class="empty-state"><span class="empty-symbol" aria-hidden="true">◎</span><h3>Evidence makes the difference.</h3><p>Run an assessment to review findings, their validation status, and the next steps.</p></div>
+          <p class="findings-footnote">Observed = recorded behavior · Confirmed = reproduced behavior · Candidate = version match requiring review</p>
+        </section>
+      </div>
+    </div>
+    <footer>vulnscope2 <span>Governed vulnerability assessment</span><span>Reports stay in server memory until eviction or restart. Download to keep a copy.</span></footer>
+  </main>
+  <dialog id="detail-dialog" aria-labelledby="detail-title">
+    <div class="drawer-top"><span class="eyebrow">FINDING DETAIL</span><button id="close-detail" class="button quiet compact" aria-label="Close finding details">Close ×</button></div>
+    <div id="detail-badges" class="badges"></div><h2 id="detail-title"></h2><p id="detail-location" class="muted mono small"></p>
+    <p id="detail-description"></p><h3>Evidence</h3><pre id="detail-evidence"></pre><h3>Remediation</h3><p id="detail-remediation"></p><h3>References</h3><div id="detail-references"></div><p id="detail-caveat" class="coverage small"></p>
+  </dialog>
+</body>
+</html>
