@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+artifacts/
+scope.txt
+/report*.json
+/report*.html
+.DS_Store

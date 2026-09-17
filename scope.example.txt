@@ -1,0 +1,5 @@
+# Replace these examples with systems you are authorized to assess.
+allow .example.com
+allow 192.0.2.0/24
+deny admin.example.com
+# Deny takes precedence; permanent denials cannot be overridden.
