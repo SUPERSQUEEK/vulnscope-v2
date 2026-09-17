@@ -58,4 +58,8 @@ def correlate(checker, target, port, text):
                                 f'Detected {version} matches an upstream affected range. {rule.condition} '
                                 'Exploitability has not been tested.', text,
                                 cves=[rule.cve], validation='candidate', reference=rule.reference,
-                                remediation='Verify the installed package and vendor advisory; apply the supported security update.')
+                                remediation='Confirm the exact installed version first: the banner can be inaccurate, and '
+                                'distributions often backport security fixes without changing the version string. Then '
+                                "consult the vendor's advisory for this CVE and apply the fixed or backported package. If you "
+                                'cannot patch immediately, apply the documented mitigation and restrict network access to the '
+                                'service until it is updated.')

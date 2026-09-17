@@ -19,6 +19,38 @@ HTTP_PORTS = {80, 8080, 8000, 8008, 8888, 9200, 11434}
 TLS_PORTS = {443, 8443}
 BODY_LIMIT = 32768
 
+# Per-item remediation so each finding carries specific, actionable guidance
+# rather than a generic "configure an appropriate policy". (text, reference)
+HEADER_GUIDANCE = {
+    'content-security-policy': (
+        'Add a Content-Security-Policy that restricts where scripts, styles and objects may load from. Start in '
+        'report-only mode with a baseline like "default-src \'self\'; object-src \'none\'; base-uri \'none\'; '
+        'frame-ancestors \'none\'", confirm nothing legitimate breaks, then enforce it. CSP is the primary defense '
+        'against injected-script (XSS) execution.',
+        'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy'),
+    'strict-transport-security': (
+        'Enable HSTS by sending "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload" so browsers '
+        'refuse to connect over plaintext HTTP. Confirm every subdomain serves valid HTTPS before adding '
+        'includeSubDomains or submitting to the preload list, because it is hard to undo.',
+        'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security'),
+    'x-content-type-options': (
+        'Send "X-Content-Type-Options: nosniff" so browsers do not MIME-sniff a response into an unintended, possibly '
+        'executable content type. Pair it with correct Content-Type headers.',
+        'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Content-Type-Options'),
+    'x-frame-options': (
+        'Prevent clickjacking by sending "X-Frame-Options: DENY" (or SAMEORIGIN if you embed your own pages), or '
+        'preferably a Content-Security-Policy "frame-ancestors \'none\'" directive, which supersedes it in modern '
+        'browsers.',
+        'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Frame-Options'),
+}
+COOKIE_GUIDANCE = {
+    'secure': 'Add the Secure attribute so this cookie is only ever transmitted over HTTPS and never sent in plaintext.',
+    'httponly': 'Add the HttpOnly attribute so client-side JavaScript cannot read this cookie, limiting theft through XSS.',
+    'samesite': 'Set SameSite=Lax (or Strict for sensitive session cookies) so it is not sent on cross-site requests, '
+                'which blunts cross-site request forgery.',
+}
+COOKIE_REFERENCE = 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie'
+
 
 @dataclass
 class Response:
@@ -132,7 +164,11 @@ class HttpChecker(Checker):
         if any(char.isdigit() for char in server):
             self.finding(target, port, 'Server version disclosure', 'low',
                          'The Server header discloses a version-like identifier.',
-                         f'Server: {server}', remediation='Suppress unnecessary version details.')
+                         f'Server: {server}',
+                         remediation='Suppress the version token in the Server header so it does not hand attackers a precise '
+                         'CVE-matching target. In nginx set "server_tokens off;"; in Apache set "ServerTokens Prod" and '
+                         '"ServerSignature Off". Also remove X-Powered-By and framework version headers.',
+                         reference='https://owasp.org/www-project-secure-headers/')
         correlate(self, target, port, f'Server: {server}')
         signatures = {b'wp-content': 'WordPress', b'__NEXT_DATA__': 'Next.js',
                       b'/_next/': 'Next.js', b'drupalSettings': 'Drupal',
@@ -154,10 +190,11 @@ class HttpChecker(Checker):
                 if header == 'x-frame-options' and 'frame-ancestors' in baseline.get('content-security-policy').lower():
                     continue
                 if not baseline.values(header):
+                    guidance, ref = HEADER_GUIDANCE.get(header, (f'Configure an appropriate {header} policy.', ''))
                     self.finding(target, port, f'Missing {header}', severity,
                                  'This response lacks a browser hardening header; impact depends on the application.',
                                  f'GET / -> {baseline.status}; {header} absent',
-                                 remediation=f'Configure an appropriate {header} policy.')
+                                 remediation=guidance, reference=ref)
         for raw in baseline.values('set-cookie'):
             cookie = SimpleCookie()
             try:
@@ -170,7 +207,9 @@ class HttpChecker(Checker):
                         self.finding(target, port, f'Cookie {name} missing {attribute}', 'low',
                                      'Cookie hardening depends on its purpose; review this attribute.',
                                      f'Set-Cookie: {name}=<redacted>; missing {attribute}',
-                                     remediation=f'Consider setting {attribute} for this cookie.')
+                                     remediation=COOKIE_GUIDANCE.get(attribute, f'Consider setting {attribute} for this cookie.')
+                                     + ' Apply this to session and authentication cookies first.',
+                                     reference=COOKIE_REFERENCE)
         # Independent probes retain baseline findings even when one probe fails.
         for probe in (self.cors, self.options, self.redirect, self.exposures):
             try:
@@ -191,7 +230,11 @@ class HttpChecker(Checker):
                          'high' if credentials else 'medium',
                          'Two unique origins were reflected' + (' with credentials enabled.' if credentials else '.') +
                          ' Authenticated data exposure was not tested.', evidence, validation='confirmed',
-                         remediation='Use an explicit trusted-origin allowlist.')
+                         remediation='Stop reflecting the request Origin. Compare it server-side against a fixed allowlist of '
+                         'trusted origins and echo back only a matched value; never return the caller\'s Origin unconditionally. '
+                         'If credentials are not required, drop Access-Control-Allow-Credentials entirely, and never combine a '
+                         'credentialed response with a wildcard or reflected origin.',
+                         reference='https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS')
 
     async def options(self, target, port, baseline):
         reply = await self.request(target, port, method='OPTIONS')
@@ -204,7 +247,10 @@ class HttpChecker(Checker):
             self.finding(target, port, 'Review advertised HTTP methods', 'low',
                          'Potentially sensitive methods are advertised. This alone does not prove they are usable.',
                          f'OPTIONS / -> {reply.status}; Allow: {allow}',
-                         remediation='Restrict unnecessary methods and verify application authorization.')
+                         remediation='Disable HTTP methods the application does not use (TRACE, PUT, DELETE, CONNECT) at the '
+                         'web server or framework, and confirm the methods you keep enforce authentication and authorization. '
+                         'TRACE in particular should be off to prevent Cross-Site Tracing.',
+                         reference='https://owasp.org/www-community/attacks/Cross_Site_Tracing')
 
     async def redirect(self, target, port, baseline):
         if baseline.status not in {301,302,303,307,308} or not baseline.get('location'):
@@ -220,7 +266,11 @@ class HttpChecker(Checker):
                      'medium' if downgrade else 'info',
                      'Two requests returned the same Location. The destination was not contacted; this does not establish an open redirect.',
                      f'GET / twice -> {repeat.status}; Location: {repeat.get("location")}', validation='confirmed',
-                     remediation='Redirect HTTPS clients only to HTTPS destinations.' if downgrade else '')
+                     remediation=('Never redirect an HTTPS request to an http:// destination; doing so strips transport '
+                                  'security and exposes the follow-up request to interception. Fix the redirect target to stay '
+                                  'on https://, and enable HSTS (Strict-Transport-Security) so browsers refuse the downgrade '
+                                  'regardless of the Location header.') if downgrade else '',
+                     reference='https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security' if downgrade else '')
 
     async def exposures(self, target, port, baseline):
         # The same five fixed paths as v1; format signatures avoid catch-all 200s.
@@ -238,6 +288,11 @@ class HttpChecker(Checker):
                     self.finding(target, port, f'{label} exposed', severity,
                                  'The public response matches the expected file format. Secret values are not retained in the report.',
                                  f'GET {path} -> 200; format marker {pattern!r}; {len(reply.body)} bytes inspected',
-                                 validation='confirmed', remediation='Remove this resource from the public web root and review exposed credentials.')
+                                 validation='confirmed',
+                                 remediation='Remove this file from the web root immediately and block access to dotfiles and '
+                                 'backups at the server (deny paths beginning with "/." and extensions like .bak/.old). Treat '
+                                 'every secret it exposed as compromised: rotate the affected credentials, keys and tokens now, '
+                                 'and review access logs for prior retrieval.',
+                                 reference='https://owasp.org/www-project-web-security-testing-guide/')
             except Exception as exc:
                 self.error(target, f'port {port}, {path}: {type(exc).__name__}: {exc}')

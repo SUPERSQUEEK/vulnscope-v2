@@ -55,11 +55,20 @@ class TlsChecker(Checker):
                 if days < 14:
                     self.finding(target, port, 'Certificate expiring soon', 'medium',
                                  f'Certificate expires in {days} day(s).', f'notAfter={expiry.isoformat()}',
-                                 remediation='Renew the certificate before expiration.')
+                                 remediation='Renew and deploy the replacement certificate now; clients begin hard-failing '
+                                 'the connection the moment it expires. Automate renewal with ACME (certbot, acme.sh, or your '
+                                 "platform's managed certificates) so certificates roll ~30 days before expiry without manual "
+                                 'steps, and monitor the expiry date externally.',
+                                 reference='https://letsencrypt.org/docs/')
         except ssl.SSLCertVerificationError as exc:
             self.finding(target, port, 'Certificate did not verify', 'high',
                          'The certificate failed local trust or hostname validation.', str(exc),
-                         remediation='Install a valid certificate and full chain matching the hostname.', validation='confirmed')
+                         remediation='Install a certificate from a publicly trusted CA whose Subject Alternative Name matches '
+                         'the hostname, and serve the full chain (leaf plus intermediates) in the correct order; a missing '
+                         'intermediate is the most common cause of this failure. Verify with '
+                         '"openssl s_client -connect host:443 -servername host" or an external SSL checker before relying on it.',
+                         reference='https://developer.mozilla.org/en-US/docs/Web/Security/Transport_Layer_Security',
+                         validation='confirmed')
         except (OSError, TimeoutError) as exc:
             self.report.notes.append(f'{target.host}:{port}: default TLS handshake: {exc or type(exc).__name__}')
 
@@ -72,7 +81,11 @@ class TlsChecker(Checker):
                 if version in (ssl.TLSVersion.TLSv1, ssl.TLSVersion.TLSv1_1):
                     self.finding(target, port, f'Confirmed deprecated {protocol}', 'high',
                                  'An exact-version handshake succeeded.', f'{protocol}; cipher={cipher}',
-                                 validation='confirmed', remediation='Disable TLS 1.0 and TLS 1.1.',
+                                 validation='confirmed',
+                                 remediation='Disable TLS 1.0 and TLS 1.1 and set TLS 1.2 as the minimum version (TLS 1.3 '
+                                 'preferred). In nginx: "ssl_protocols TLSv1.2 TLSv1.3;". In Apache: '
+                                 '"SSLProtocol -all +TLSv1.2 +TLSv1.3". RFC 8996 deprecates both protocols and PCI DSS '
+                                 'prohibits them.',
                                  reference='https://datatracker.ietf.org/doc/rfc8996/')
             except (OSError, TimeoutError, ValueError) as exc:
                 failures[version.name] = str(exc) or type(exc).__name__
@@ -110,9 +123,18 @@ class TlsChecker(Checker):
         if weak:
             self.finding(target, port, 'Confirmed weak TLS cipher support', 'high',
                          'Individual handshakes negotiated weak suites.', ', '.join(weak),
-                         validation='confirmed', remediation='Disable anonymous, null, export, RC4 and DES cipher suites.')
+                         validation='confirmed',
+                         remediation='Remove anonymous (ADH/AECDH), NULL, EXPORT, RC4, DES/3DES and MD5 cipher suites from '
+                         "the server's configuration and offer only AEAD suites. The simplest reliable fix is to apply a "
+                         "generated cipher list from Mozilla's SSL Configuration Generator ('Intermediate' for broad "
+                         "compatibility, 'Modern' for TLS 1.3-only clients) for your exact server and version.",
+                         reference='https://ssl-config.mozilla.org/')
         legacy = [c for c in supported if c not in weak and ('GCM' not in c and 'CHACHA20' not in c)]
         if legacy:
             self.finding(target, port, 'Legacy non-AEAD TLS ciphers accepted', 'low',
                          'These suites lack modern AEAD; this observation does not prove a specific cryptographic attack.',
-                         ', '.join(legacy), validation='confirmed', remediation='Prefer ECDHE with AES-GCM or ChaCha20-Poly1305.')
+                         ', '.join(legacy), validation='confirmed',
+                         remediation='Prefer AEAD cipher suites (AES-GCM or ChaCha20-Poly1305 with ECDHE key exchange) and, '
+                         'where client compatibility allows, remove the older CBC-mode suites. Generate a current, ordered '
+                         "cipher list from Mozilla's SSL Configuration Generator for your server rather than hand-editing it.",
+                         reference='https://ssl-config.mozilla.org/')

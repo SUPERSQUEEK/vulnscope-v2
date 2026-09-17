@@ -33,15 +33,25 @@ class DnsChecker(Checker):
             if not policies:
                 self.finding(target, None, 'No SPF record at scanned name', 'medium',
                              'Mail policy may live at another name; this scan does not infer the mail domain.', evidence,
-                             remediation='Publish SPF if this name sends mail.')
+                             remediation='Publish one SPF TXT record listing every host and service authorized to send mail '
+                             'for this name, ending in "-all" to hard-fail all others (e.g. '
+                             '"v=spf1 include:_spf.google.com ip4:198.51.100.0/24 -all"). If this name never sends mail, '
+                             'publish "v=spf1 -all" so spoofed mail from it is rejected outright.',
+                             reference='https://datatracker.ietf.org/doc/html/rfc7208')
             elif len(policies) > 1:
                 self.finding(target, None, 'Multiple SPF policies', 'medium',
                              'Multiple SPF records cause a policy evaluation error.', evidence,
-                             remediation='Consolidate senders into a single SPF record.')
+                             remediation='Merge every sending source into a single SPF TXT record. RFC 7208 permits only one '
+                             'SPF record per name; more than one causes a PermError that voids SPF entirely, so combine the '
+                             'include:/ip4:/ip6: mechanisms into one string ending in "-all".',
+                             reference='https://datatracker.ietf.org/doc/html/rfc7208')
             elif any(term in {'all','+all'} for term in policies[0].lower().split()):
                 self.finding(target, None, 'SPF permits any sender', 'high',
                              'The policy contains an unconditional pass mechanism.', evidence,
-                             remediation='Replace permissive all with an appropriate restrictive policy.')
+                             remediation='Remove the "+all"/"all" mechanism, which authorizes the entire internet to send as '
+                             'this domain. After enumerating legitimate senders with include:/ip4:/ip6:, end the record with '
+                             '"-all" (hard fail), or "~all" (soft fail) only during a staged rollout.',
+                             reference='https://datatracker.ietf.org/doc/html/rfc7208')
             elif '?all' in policies[0].lower().split():
                 self.finding(target, None, 'SPF neutral catch-all', 'low',
                              'The policy makes no assertion about unlisted senders.', evidence)
@@ -50,7 +60,11 @@ class DnsChecker(Checker):
             if not policies:
                 self.finding(target, None, 'No DMARC record at scanned name', 'medium',
                              'Organizational-domain inheritance is not evaluated.', evidence,
-                             remediation='Review the effective DMARC policy for your mail domain.')
+                             remediation='Publish a DMARC record as a TXT record at "_dmarc.<domain>", e.g. '
+                             '"v=DMARC1; p=reject; rua=mailto:dmarc-reports@yourdomain; adkim=s; aspf=s". Begin at "p=none" '
+                             'with rua reporting to observe legitimate mail, then raise to quarantine and reject. DMARC is '
+                             'evaluated at the organizational domain, so a subdomain may inherit a parent policy.',
+                             reference='https://datatracker.ietf.org/doc/html/rfc7489')
             else:
                 tags = {key.strip().lower(): value.strip().lower()
                         for part in policies[0].split(';') if '=' in part
@@ -61,7 +75,11 @@ class DnsChecker(Checker):
                 elif tags['p'] == 'none':
                     self.finding(target, None, 'DMARC monitoring only', 'low',
                                  'The published policy requests reporting without enforcement.', evidence,
-                                 remediation='Move to quarantine or reject after validating legitimate senders.')
+                                 remediation='Once your aggregate (rua) reports confirm that legitimate mail passes SPF or '
+                                 'DKIM with alignment, raise the policy from "p=none" to "p=quarantine" and then "p=reject" '
+                                 'so spoofed mail is actually blocked rather than only reported. Use "pct=" to roll '
+                                 'enforcement out in stages if the sending estate is large.',
+                                 reference='https://datatracker.ietf.org/doc/html/rfc7489')
         elif kind == 'DNSKEY':
             self.finding(target, None, 'DNSKEY observation', 'info',
                          'Key presence does not validate DNSSEC. Absence at a non-apex name does not establish an unsigned zone.', evidence)

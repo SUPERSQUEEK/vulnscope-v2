@@ -44,7 +44,13 @@ class PortChecker(Checker):
             if port in SENSITIVE:
                 self.finding(target, port, f'{SENSITIVE[port]} reachable', 'high',
                              'A sensitive service is reachable from the scanner. Authentication and public exposure are not established.',
-                             evidence, remediation='Restrict access to trusted clients with network policy.')
+                             evidence, remediation=f'Do not expose {SENSITIVE[port]} to untrusted networks. Bind it to '
+                             'localhost or a private interface, and place it behind a firewall or cloud security group that '
+                             'permits only known management hosts (ideally over a VPN or bastion). If remote access is '
+                             'genuinely required, require strong authentication and TLS, and replace legacy plaintext '
+                             'protocols (Telnet, unencrypted VNC) with SSH or a tunnelled equivalent. Databases and '
+                             'search/cache engines should never be directly internet-facing.',
+                             reference='https://owasp.org/www-project-top-ten/2021/A05_2021-Security_Misconfiguration/')
             else:
                 self.finding(target, port, f'Open port {port}/{label}', 'info',
                              'Service discovered; version strings are untrusted observations.', evidence)
